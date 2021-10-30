@@ -1,0 +1,173 @@
+import numpy as np
+import cv2
+def center(x, y, w, h): #get the center of the coordinates
+    x1 = int(w / 2)
+    y1 = int(h / 2)
+    cx = x + x1
+    cy = y + y1
+    return cx,cy
+    def run(video, height, width, detectgrps):
+    
+    #create the subtractor for the max
+    bkgrnd_removed = cv2.createBackgroundSubtractorMOG2()
+
+    detects = []
+
+    #position the middle line (vertically)### CHANGE THIS DEPENDING ON THE HEIGHT OF THE VIDEO USED(300 or 200 for 3.mp4)###
+    line_position = int(height/2)
+    
+    #position the offset lines (how many pixels away from the middle line)
+    offset = 30
+
+    #position the lines start and endpoints (horizontally)
+    xy1 = (0, line_position)
+    xy2 = (int(width), line_position)
+
+    #counters
+    total = 0
+    up = 0
+    down = 0
+
+    #go over all frames until the loop breaks
+    while 1: 
+        #read frame
+        ret, frame = video.read()
+        #condition to break when the video ends
+        if(frame is None):
+            break
+
+        #convert frame to gray
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        cv2.imshow("gray", gray)
+
+        #remove background
+        mask = bkgrnd_removed.apply(gray)
+        cv2.imshow("mask", mask)
+
+        #turn values above threshold to white
+        retval, threshold = cv2.threshold(mask, 200, 255, cv2.THRESH_BINARY)
+        cv2.imshow("threshold", threshold)
+
+        #remove noise
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        opening = cv2.morphologyEx(threshold, cv2.MORPH_OPEN, kernel, iterations = 2)
+        cv2.imshow("opening", opening)
+
+        #dilation (increase the white region after removing noise)
+        dilation = cv2.dilate(opening,kernel,iterations = 8)
+        cv2.imshow("dilation", dilation)
+
+        #closing holes(this might be bad when two people are close)
+        closing = cv2.morphologyEx(dilation, cv2.MORPH_CLOSE, kernel, iterations = 8)
+        cv2.imshow("closing", closing)
+
+        #drawing middile lines
+        cv2.line(frame,xy1,xy2,(0,255,0),2)
+
+        cv2.line(frame,(xy1[0],line_position-offset),(xy2[0],line_position-offset),(0,255,255),1)
+
+        cv2.line(frame,(xy1[0],line_position+offset),(xy2[0],line_position+offset),(0,255,255),1)
+
+        #detect the movement ane contour it
+        contours, hierarchy = cv2.findContours(dilation,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+        
+        i = 0
+        #go over the people
+        for cnt in contours:
+            
+            (x,y,w,h) = cv2.boundingRect(cnt)
+            #get the area of the detected body
+            area = cv2.contourArea(cnt)
+            
+            #set color of the rectangles to blue
+            color = (255,0,0)
+            
+            #if the body is big enough count it (needs modification for different videos depending on the size of the objects)
+            if int(area) > 2000:
+                
+                #if the body is too big then it means it is more than 1 person so the rectangle becomes Red
+                if (int(area) > 7500) and (detectgrps):
+                    color = (0,0,255)
+                
+                
+                #get the center of the body
+                mid = center(x, y, w, h)
+            
+                #draw the text and borders of the object 
+                cv2.putText(frame, str(i), (x+5, y+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255),2)
+                cv2.circle(frame, mid, 4, (0, 0,255), -1)
+                cv2.rectangle(frame,(x,y),(x+w,y+h), color ,2)
+                if len(detects) <= i:
+                    detects.append([])
+                if mid[1]> line_position-offset and mid[1] < line_position+offset:
+                    detects[i].append(mid)
+                else:
+                    detects[i].clear()
+                i += 1
+        #counter
+        if i == 0:
+            detects.clear()
+
+        i = 0
+
+        if len(contours) == 0:
+            detects.clear()
+
+        else:
+
+            for detect in detects:
+                for (c,l) in enumerate(detect):
+
+
+                    if detect[c-1][1] < line_position and l[1] > line_position :
+                        detect.clear()
+                        up+=1
+                        total+=1
+                        cv2.line(frame,xy1,xy2,(0,255,0),5)
+                        continue
+
+                    if detect[c-1][1] > line_position and l[1] < line_position:
+                        detect.clear()
+                        down+=1
+                        total+=1
+                        cv2.line(frame,xy1,xy2,(0,0,255),5)
+                        continue
+
+                    if c > 0:
+                        cv2.line(frame,detect[c-1],l,(0,0,255),1)
+
+        #write the counters on frame
+        cv2.putText(frame, "TOTAL: "+str(total), (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255),2)
+        cv2.putText(frame, "Up: "+str(up), (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255),2)
+        cv2.putText(frame, "Down: "+str(down), (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255),2)
+        
+        #show the frame
+        cv2.imshow("frame", frame)
+
+        if cv2.waitKey(30) & 0xFF == ord('q'): #quit when pressing "q"
+            break
+ 
+    #print the final numbers
+    print('Total: '+ str(total) )
+    print('Up: ' + str(up))
+    print('Down:' + str(down))
+
+    #destroy all windows
+    video.release()
+    cv2.destroyAllWindows()
+    #import the video
+vid = cv2.VideoCapture('videos/2.mp4')#change between 1.mp4 -> 3.mp4
+
+#get the height and the width of the imported video
+height = vid.get(cv2.CAP_PROP_FRAME_HEIGHT)
+width = vid.get(cv2.CAP_PROP_FRAME_WIDTH)
+
+
+#Notify for groups of people(make true when using 3.mp4) #this feature works when the camera is a little far away 
+detectgrps = False #keep it false if using 1.mp4 or 2.mp4, true when using 3.mp4
+
+#run #press 'q' to quit while running
+run(vid, height, width, detectgrps)
+
+#### NOTE THAT TO WORK PERFECTLY THE PARAMETERS OF THE FUNCTIONS LIKE THE KERNEL OF THE THRESHOLD SHOULD BE OPTIMIZED
+#### FOR EACH VIDEO. (THEY ARE NOW OPTIMIZED TO WORK IN AN ACCEPTABLE WAY WITH THE THREE PROVIDED TEST VIDEOS)
